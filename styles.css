@@ -1,0 +1,333 @@
+/* ==========================================================================
+   Google Font — Rubik, regular (400) + semibold (600, imprint headings/labels)
+   ========================================================================== */
+@import url('https://fonts.googleapis.com/css2?family=Rubik:wght@400;600&display=swap');
+
+:root {
+  --dark-text:   rgba(7, 0, 68, 1);
+  --light-text:  rgba(255, 255, 255, 1);
+  --white:       #FFFFFF;
+  --warning-bg:  #1A2740;
+  --navy:        #0F0F3D;
+  --orange-bg:   #FFAA00;
+  --neutral-bg:  #C8CDD6;  /* fallback, locating, search UI (from neutral) */
+  --medium-bg:   #8BD2EC;  /* medium temperature (12-22 °C) */
+  --cold-bg:     #8FA0B5;  /* cold temperature (< 12 °C) */
+  --input-bg:    #FFFFFF;
+  --placeholder: rgba(7, 0, 68, 0.45);
+  --font:        'Rubik', sans-serif;
+}
+
+/* Animated gradient angle — registered so it can be interpolated */
+@property --grad-angle {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 155deg;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { height: 100%; }
+
+body {
+  font-family: var(--font);
+  font-weight: 400;
+  color: var(--dark-text);
+  min-height: 100vh;
+  background-color: var(--bg-colour, var(--neutral-bg));
+  background-image: linear-gradient(
+    to bottom,
+    rgba(7, 0, 68, 0.15) 0%,
+    rgba(7, 0, 68, 0)    75%
+  );
+  background-repeat: no-repeat;  /* long screens (imprint) must not tile the gradient */
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
+  padding: 60px 32px 16px;
+  box-sizing: border-box;
+  transition: background-color 0.5s ease;
+}
+
+/* ==========================================================================
+   Weather gradient — per WMO code (values in app.js → WEATHER_COLORS).
+   Start colour at the top (0 %), transparent at 70 %. The angle tilts
+   ±25° around vertical (155° ↔ 205°), ease-in-out, there and back,
+   each direction lasting --grad-loop.
+   ========================================================================== */
+body.weather-gradient { background-image: none; }
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: linear-gradient(var(--grad-angle), var(--grad-start, transparent) 0%, transparent 70%);
+  opacity: 0;
+  transition: opacity 0.5s ease;
+}
+
+body.weather-gradient::before {
+  opacity: 1;
+  animation: grad-tilt var(--grad-loop, 6000ms) ease-in-out infinite alternate;
+}
+
+@keyframes grad-tilt {
+  from { --grad-angle: 155deg; }  /* 180° − 25° */
+  to   { --grad-angle: 205deg; }  /* 180° + 25° */
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body.weather-gradient::before { animation: none; --grad-angle: 180deg; }
+}
+
+/* ==========================================================================
+   UTILITIES — one rule per visual property, reused across components.
+   Elements combine a semantic class (meaning/hook) with one or more
+   utilities (look). Change a look here once, not per component.
+   ========================================================================== */
+
+/* Layout */
+.u-row    { display: flex; align-items: center; gap: 4px; }
+.u-center { display: flex; align-items: center; justify-content: center; }
+
+/* Spacing */
+.u-mb-24 { margin-bottom: 24px; }
+.u-mr-4  { margin-right: 4px; }
+.u-p-0   { padding: 0; }
+
+/* Sizing */
+.u-w-full    { width: 100%; }
+.u-h-56      { height: 56px; }
+.u-size-28   { width: 28px; height: 28px; }
+.u-shrink-0  { flex-shrink: 0; }
+.u-radius-12 { border-radius: 12px; }
+.u-rounded-full { border-radius: 50%; }
+
+/* Typography scale */
+.u-text-62 {
+  font-size: 62px;
+  line-height: 1;
+  letter-spacing: -0.5px;
+  word-spacing: 0.1em;
+  word-break: break-word;
+}
+.u-text-24 { font-size: 24px; line-height: 1; }
+.u-text-16 { font-size: 16px; }
+
+/* Text color */
+.u-text-light { color: var(--light-text); }
+.u-text-white { color: var(--white); }
+.u-text-muted { color: var(--placeholder); }
+
+/* Interaction */
+.u-cursor-pointer { cursor: pointer; }
+
+/* Motion */
+.u-fade-in      { animation: fadeIn 0.5s ease-out; }
+.u-fade-in-fast { animation: fadeIn 0.3s ease-out; }
+.u-spin         { animation: spin 0.8s linear infinite; }
+
+/* ==========================================================================
+   Components — structure/behaviour specific to one element.
+   Shared look (size, color, spacing) comes from the u-* utilities above,
+   applied alongside these classes in the markup.
+   ========================================================================== */
+
+.card { max-width: 360px; }
+
+.row-header { overflow: visible; }
+.row-header .close-btn { margin-left: auto; }
+
+.exclamation-wrapper {}
+.locating-row {}
+.row-closebox {}
+
+.locating-status { margin: 0; }
+
+.searching-text { margin-bottom: 14px; }
+
+/* Status / label text */
+.status {
+  display: inline-block;
+  vertical-align: middle;
+}
+
+/* Input field */
+.input-field {
+  padding: 0 20px;
+  background: var(--input-bg);
+  border: none;
+  outline: none;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  transition: box-shadow 0.2s;
+}
+
+.input-field.focused { box-shadow: 0 4px 16px rgba(7, 0, 68, 0.12); }
+.input-field::placeholder { color: var(--placeholder); }
+
+/* CTA button */
+.cta-btn {
+  margin-top: 12px;
+  background: var(--navy);
+  border: none;
+  transition: background 0.2s, transform 0.1s;
+}
+
+.cta-btn:hover  { background: #1E1F4D; }
+.cta-btn:active { transform: scale(0.98); }
+.cta-btn:disabled { opacity: 0.5; cursor: default; }
+
+/* Exclamation icon */
+.exclamation-icon { background: var(--warning-bg); }
+.exclamation-icon.spin { opacity: 0.9; }
+
+/* Close button */
+.close-btn {
+  width: 32px;
+  height: 32px;
+  background: none;
+  border: none;
+  color: var(--warning-bg);
+  font-size: 36px;
+  font-weight: 100;
+  line-height: 1;
+  transition: color 0.2s;
+}
+
+.close-btn:hover { color: var(--dark-text); }
+
+/* ==========================================================================
+   Weather result components
+   ========================================================================== */
+
+.weather-icon { font-size: 32px; line-height: 1; }
+
+.weather-temp { letter-spacing: -0.5px; }
+
+.weather-temp .deg {
+  font-size: 14px;
+  vertical-align: super;
+  margin-left: 1px;
+}
+
+.weather-pre { margin-left: 4px; }
+
+.weather-city {
+  margin-left: 2px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
+  text-decoration-color: rgba(7, 0, 68, 0.4);
+  transition: text-decoration-color 0.2s;
+}
+
+.weather-city:hover,
+.weather-city:focus {
+  text-decoration-color: var(--dark-text);
+  outline: none;
+}
+
+.weather-city em { font-style: normal; }
+
+.day-msg {}
+
+/* Cyclist animation — 120px above the bottom edge of the viewport */
+.cyclist,
+.cyclist-pass {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 120px;
+  margin: 0 auto;
+  width: min(1720px, 75vw, 50vh * 1720 / 1268);  /* same box the <img> had: intrinsic size, capped */
+  aspect-ratio: 1720 / 1268;
+  pointer-events: none;
+  transform: translateX(calc(-50vw - 50%));  /* parked off-screen left until the intro runs */
+}
+
+/* ==========================================================================
+   Imprint
+   ========================================================================== */
+
+/* Link — centred, 70px above the bottom edge of the viewport */
+.imprint-link {
+  position: fixed;
+  left: 50%;
+  bottom: 70px;
+  transform: translateX(-50%);
+  z-index: 1;
+  font-size: 14px;
+  color: var(--dark-text);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
+  text-decoration-color: rgba(7, 0, 68, 0.4);
+  transition: text-decoration-color 0.2s;
+}
+
+.imprint-link[hidden] { display: none; }
+
+.imprint-link:hover,
+.imprint-link:focus-visible {
+  text-decoration-color: var(--dark-text);
+  outline: none;
+}
+
+/* "Impressum" is ~5.2em wide — shrink slightly on narrow phones so the
+   single word never breaks (62px from ~390px viewport width upwards) */
+.imprint-headline { font-size: min(62px, calc((100vw - 64px) / 5.3)); }
+
+.imprint-text { line-height: 1.25; padding-bottom: 48px; }
+
+/* One vertical rhythm: 1.25em between all blocks, more above headings */
+.imprint-text > * + * { margin-top: 1.25em; }
+.imprint-text > .imprint-h2 { margin-top: 2em; }
+.imprint-text > .imprint-h3 { margin-top: 1.75em; }
+.imprint-text > .imprint-h3 + *,
+.imprint-text > .imprint-h2 + .imprint-h3 { margin-top: 0.5em; }
+.imprint-text > .imprint-h2 + * { margin-top: 0.75em; }
+
+/* Headings + run-in labels ("Aufsichtsbehörde:", "Cookies" …):
+   semibold, dark — white on the light backgrounds is not legible */
+.imprint-h2,
+.imprint-h3,
+.imprint-label { font-weight: 600; color: var(--dark-text); }
+
+/* Bullet lists — en dash, hanging indent */
+.imprint-list { list-style: none; }
+.imprint-list li { position: relative; padding-left: 1em; }
+.imprint-list li::before { content: "–"; position: absolute; left: 0; }
+
+/* Links — same underline treatment as .weather-city / .imprint-link */
+.imprint-text a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
+  text-decoration-color: rgba(7, 0, 68, 0.4);
+  transition: text-decoration-color 0.2s;
+  overflow-wrap: anywhere;
+}
+.imprint-text a:hover,
+.imprint-text a:focus-visible { text-decoration-color: var(--dark-text); outline: none; }
+
+/* ==========================================================================
+   Spinner
+   ========================================================================== */
+.spinner {
+  border: 3px solid rgba(7, 0, 68, 0.15);
+  border-top-color: var(--dark-text);
+  opacity: 0.7;
+}
+
+/* ==========================================================================
+   Animations
+   ========================================================================== */
+@keyframes spin { to { transform: rotate(360deg); } }
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}

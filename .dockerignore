@@ -1,0 +1,7 @@
+.git
+.gitattributes
+.gitignore
+.DS_Store
+_backup*/
+Dockerfile
+.dockerignore

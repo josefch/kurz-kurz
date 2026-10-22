@@ -293,7 +293,11 @@ body.weather-gradient::before {
    semibold, dark — white on the light backgrounds is not legible */
 .imprint-h2,
 .imprint-h3,
-.imprint-label { font-weight: 600; color: var(--dark-text); }
+.imprint-label {color: var(--dark-text); }
+
+.imprint-h3,
+.imprint-label {font-weight: 600; }
+.imprint-h2 {font-weight: 400; }
 
 /* Bullet lists — en dash, hanging indent */
 .imprint-list { list-style: none; }

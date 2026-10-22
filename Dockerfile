@@ -1,4 +1,4 @@
-# Geht heute kurz-kurz? — static site (index.html, styles.css, app.js, assets/).
+# Geht heute kurz-kurz? — static site (index.html, styles.css, app.js, assets/, fonts/).
 # No build step: nginx serves the files as they are in the repo.
 #
 # Coolify: build pack "dockerfile", base directory /, Dockerfile /Dockerfile, port 3000.
@@ -9,6 +9,7 @@ FROM nginxinc/nginx-unprivileged:1.29-alpine
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY --chown=nginx:nginx index.html styles.css app.js /usr/share/nginx/html/
 COPY --chown=nginx:nginx assets/ /usr/share/nginx/html/assets/
+COPY --chown=nginx:nginx fonts/ /usr/share/nginx/html/fonts/
 
 ENV PORT=3000
 EXPOSE 3000

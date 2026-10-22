@@ -12,7 +12,7 @@ const UI = {
   // --- Fallback screen (shown when geolocation fails/is denied) ---
   fallbackStatus:  "Ort nicht gefunden",
   fallbackHeadline: "Suche deine Stadt!",
-  inputPlaceholder: "z.B. Wien, Honkkong, Altschmiedelfeld",
+  inputPlaceholder: "z.B. Wien, Hongkong, Altschmiedelfeld",
   ctaSearch:       "Suchen",
 
   // --- Search UI overlay ---

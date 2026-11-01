@@ -1,0 +1,24 @@
+# Keeps the deploy fork josefch/kurz-kurz equal to ulfnotulf/kurz-kurz.
+# Coolify watches the fork; this fast-forwards it every 15 minutes, and the
+# resulting push deploys. Does nothing in the upstream repo (guard below).
+# A failed run means the histories diverged: sync by hand (git merge) once.
+name: Sync from upstream
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  sync:
+    if: github.repository == 'josefch/kurz-kurz'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: main
+      - run: |
+          git fetch --no-tags https://github.com/ulfnotulf/kurz-kurz.git main
+          git merge --ff-only FETCH_HEAD
+          git push origin HEAD:main

@@ -535,7 +535,7 @@ function pedalTick(now) {
     if (!host.isConnected) { pedalling.delete(host); continue; }
     const x = new DOMMatrixReadOnly(getComputedStyle(host).transform).m41;
     const dt = s.t === null ? 0 : now - s.t;
-    if (s.hop) { /* the bunnyhop drives the crank */ }
+    if (s.hop || s.tuck) { /* bunnyhop / tuck drive the crank */ }
     else if (dt > 0) {
       const v = (x - s.x) / dt;                                         /* px per ms, relative to the camera */
       const vRef = (window.innerWidth + host.offsetWidth) / PASS_MS;    /* convoy speed */
@@ -681,8 +681,8 @@ const HOP_ELEMENTS = {
 };
 
 /* ==========================================================================
-   Rider gestures — tap on the front wheel: wheelie; tap elsewhere on the
-   rider: bunnyhop; drag right: rides out to the right and
+   Rider gestures — tap on the front wheel: wheelie; tap on the upper body:
+   super tuck; tap elsewhere on the rider: bunnyhop; drag right: rides out to the right and
    comes back from the left; drag left: falls back out to the left (slower)
    and comes back from the right — only when released fast enough (FLING_V),
    otherwise the rider rolls back to the centre. While dragged the rider
@@ -723,17 +723,30 @@ function enableRiderGestures(host) {
     const radius = Math.max(22, r.width / 2 + WHEELIE.hitSlopPx);  /* ≥ 44 px target */
     return Math.hypot(e.clientX - (r.left + r.width / 2), e.clientY - (r.top + r.height / 2)) <= radius;
   };
+  /* upper body: the pointer mapped into drawing units via the host's own box
+     (HTML, includes its translateX) — no geometry queries on SVG elements
+     inside the shadow root, whose CSS-animated transforms Safari does not
+     report reliably. The drawing sits at the top of the host box. */
+  const onTorso = e => {
+    const r = host.getBoundingClientRect();
+    const u = STAGE.w / r.width;
+    const x = (e.clientX - r.left) * u, y = (e.clientY - r.top) * u;
+    const { rects, head } = TUCK_HIT;
+    return rects.some(q => x >= q.x && x <= q.x + q.w && y >= q.y && y <= q.y + q.h)
+      || Math.hypot(x - head.x, y - head.y) <= head.r;
+  };
   const listen = new AbortController();
   document.addEventListener('pointerdown', e => {
     if (!host.isConnected) { listen.abort(); return; }
     if (!e.isPrimary || e.button > 0) return;
     if (e.composedPath().some(el => el instanceof Element && el.matches(GESTURE_EXCLUDE))) return;
     const ps = pedalling.get(host);
-    if (host.dataset.leaving || ps?.hop || ps?.wheelie) return;
+    if (host.dataset.leaving || ps?.hop || ps?.wheelie || ps?.tuck) return;
     if (host.dataset.moving && !host.dataset.returning) return;  /* ride-out / re-entry runs */
     e.preventDefault();
     const wheelTap = onFrontWheel(e);
-    const tap = wheelTap || onFigure(e);
+    const torsoTap = !wheelTap && onTorso(e);
+    const tap = wheelTap || torsoTap || onFigure(e);
     const id = e.pointerId, x0 = e.clientX;
     let base = null;               /* translateX at drag start, minus the slop */
     const samples = [{ x: x0, t: e.timeStamp }];
@@ -755,7 +768,7 @@ function enableRiderGestures(host) {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', end);
       window.removeEventListener('pointercancel', end);
-      if (base === null) { if (ev.type === 'pointerup' && tap) (wheelTap ? startWheelie : startHop)(host); return; }
+      if (base === null) { if (ev.type === 'pointerup' && tap) (wheelTap ? startWheelie : torsoTap ? startTuck : startHop)(host); return; }
       if (host.dataset.leaving) return;
       const vx = releaseSpeed(samples, ev.timeStamp);
       const dx = ev.clientX - x0;
@@ -853,7 +866,7 @@ function returnCyclist(img, v0 = 0) {
 function startHop(host) {
   const s = pedalling.get(host);
   const root = host.shadowRoot;
-  if (!s || s.hop || s.wheelie || host.dataset.leaving || prefersReducedMotion()) return;
+  if (!s || s.hop || s.wheelie || s.tuck || host.dataset.leaving || prefersReducedMotion()) return;
   if (host.dataset.moving && !host.dataset.returning) return;  /* hopping while drifting back is fine */
   const svg = root.querySelector('svg');
   const els = Object.fromEntries(Object.entries(HOP_ELEMENTS).map(([k, id]) => [k, root.getElementById(id)]));
@@ -993,7 +1006,7 @@ const angleTo = (p, q) => Math.atan2(q.y - p.y, q.x - p.x) * 180 / Math.PI;
 function startWheelie(host) {
   const s = pedalling.get(host);
   const root = host.shadowRoot;
-  if (!s || s.hop || s.wheelie || host.dataset.leaving || prefersReducedMotion()) return;
+  if (!s || s.hop || s.wheelie || s.tuck || host.dataset.leaving || prefersReducedMotion()) return;
   if (host.dataset.moving && !host.dataset.returning) return;
   const figure = root && root.querySelector('svg > g');
   const wrap = Object.fromEntries(WHEELIE_PARTS.map(id => [id, root && root.querySelector(`[data-wheelie="${id}"]`)]));
@@ -1118,6 +1131,311 @@ function startWheelie(host) {
     requestAnimationFrame(frame);
   };
   requestAnimationFrame(frame);
+}
+
+/* ==========================================================================
+   Super tuck — click / tap on the upper body (torso, hip, head; the arms
+   over the front wheel stay with the wheelie). The aero position for
+   descents:
+     1. Einleitung  three powerful pedal strokes accelerate the rider
+     2. Tuck        right after the last stroke the crank runs out to a stop
+                    with the pedals at 45°, bob and tyre squash settle; the
+                    rider swings into the tuck — torso forward and down, head
+                    lower and turned, elbows and knees closed — and, rolling,
+                    keeps gaining speed until it leaves to the right;
+                    balancing: pedals rock, torso bobs
+     3. Ende        it comes back from the left at the same speed, brakes into
+                    the centre, sits up and pedals again
+   Hands (bar) and feet (pedals) are the contact points: elbows and knees
+   follow by two-bone IK. Every frame the pose is blended from the pedalling
+   pose at the current crank phase (k = 0, read from the paused CSS
+   animations) to the tuck (k = 1); the IK's deviation from the drawn
+   keyframes fades out with k, so k = 0 is exactly the drawing. The pose is
+   written as inline !important transforms: they beat the CSS animations and
+   are lifted for one style read per frame.
+   Lengths in SVG units (viewBox 1720 × 1137, y down), angles in degrees,
+   + = clockwise. Measured against the reference drawing of the tuck.
+   ========================================================================== */
+const TUCK = {
+  bodyShift:     { x: 40, y: 100 },  /* torso, hip and shoulders: forward and down */
+  headShift:     { x: 20, y: 60 },  /* head relative to the torso */
+  headDeg:       30,                /* head turned clockwise: chin down, gaze ahead */
+  stopPhases:    [318.75, 743.75],  /* crank ms with the pedals at 45° (10:30 / 4:30) */
+  /* 1. Einleitung: powerful pedal strokes accelerate the rider */
+  strokes:       2,                 /* pedal strokes (one stroke = half a crank turn) */
+  strokeRpm:     115,               /* cadence of the strokes */
+  strokeRampMs:  150,               /* from the current cadence up to strokeRpm */
+  strokeGain:    0.5,              /* speed the strokes add, × convoy speed ((viewport + figure) / PASS_MS) */
+  /* 2. Tuck: right after the last stroke */
+  freewheelMs:   300,               /* crank runs out to the 45° stop */
+  inMs:          500,               /* blend into the tuck */
+  inBack:        1.7,               /* swing past the tuck (easeOutBack; 0 = none, 1.7 ≈ 10 %) */
+  rollAccel:     0.5,               /* acceleration in the tuck, × convoy speed per second */
+  /* 3. Ende: back from the left at the exit speed (arriveCyclist) */
+  outMs:         700,               /* phase 3: sitting up, ends with the arrival */
+  resumeMs:      350,               /* time constant of the cadence ramp after the tuck */
+  /* balancing while rolling — fades in once the crank has stopped, out while sitting up */
+  pedalRockDeg:  5,                 /* pedals rock forward and back by ± this around the 45° stop */
+  pedalRockMs:   900,               /* one forward-and-back cycle */
+  bodyBob:       10,                /* torso (with hip, shoulders, head) up and down by ± this */
+  bodyBobMs:     1300,              /* one up-and-down cycle */
+  balanceFadeMs: 400,               /* fade-in after the crank has stopped */
+};
+const TUCK_RIG = {
+  legOrigin: { x: 473.571, y: 0.571 },  /* #leg-far / #leg-near translate */
+  legPivot: 315.429, bone: 302,          /* thigh = shank */
+  hip:      { x: 789, y: 316 },          /* thigh pivot without bob */
+  crank:    { x: 789, y: 831.55 }, crankR: 88.5,
+  bodyBase: { x: 735, y: 129 },          /* #upper-body translate without bob */
+  shoulder: { x: 558, y: 117 },          /* in #upper-body */
+  wrist:    { x: 580, y: 472 },          /* in #upper-body, without bob */
+  upperArmPivot: 166, forearmPivot: 188, upperArm: 234.76, forearm: 265.87,
+  upperArmDir: { x: -166, y: 166 },      /* shoulder → elbow, unrotated */
+  forearmDir:  { x: -188, y: -188 },     /* wrist → elbow, unrotated */
+  head: { x: 607, y: -87 }, headPivot: 103,  /* #kopf-container in #upper-body */
+  wheelsY: 425,                          /* #r__der translate without bob */
+  squashHalfCycle: CRANK_CYCLE_MS / 2000,  /* s — the SMIL tyre squash is round at multiples */
+};
+const TUCK_HIT = {  /* tap targets of the upper body, drawing units at rest, incl. the pedalling bob */
+  rects: [{ x: 735, y: 125, w: 610, h: 200 },   /* torso */
+          { x: 735, y: 195, w: 110, h: 195 }],  /* hip */
+  head:  { x: 1445, y: 155, r: 115 },           /* head with cap */
+};
+const TUCK_ELEMENTS = {
+  body: 'upper-body', head: 'kopf-container', upperArm: 'ober-arm', forearm: 'unter-arm', bike: 'r__der',
+  thighFar: 'thigh-pivot-leg-far', shankFar: 'shank-pivot-leg-far',
+  thighNear: 'thigh-pivot-leg-far_2', shankNear: 'shank-pivot-leg-far_2',
+};
+
+function startTuck(host) {
+  const s = pedalling.get(host);
+  const root = host.shadowRoot;
+  if (!s || s.hop || s.wheelie || s.tuck || host.dataset.leaving || prefersReducedMotion()) return;
+  if (host.dataset.moving && !host.dataset.returning) return;
+  const svg = root.querySelector('svg');
+  const els = Object.fromEntries(Object.entries(TUCK_ELEMENTS).map(([k, id]) => [k, root.getElementById(id)]));
+  if (!svg || Object.values(els).some(el => !el)) return;  /* <img> fallback */
+
+  const x0 = holdCyclist(host);
+  host.dataset.moving = '1';  /* no gestures until it is back — startIdleSway clears it */
+  s.tuck = true;
+
+  /* Crank plan (crank ms): ramp from the current cadence to strokeRpm, the
+     strokes at strokeRpm, then a freewheel with constant deceleration that
+     ends at the 45° stop. The stroke time is stretched or shortened a little
+     so the run ends exactly there. */
+  const C = CRANK_CYCLE_MS;
+  const from = s.phase;
+  const v0 = Math.max(s.rpm, CADENCE_BASE_RPM / 2) / 60000 * C;  /* crank ms per ms */
+  const vS = TUCK.strokeRpm / 60000 * C;
+  const rampMs = TUCK.strokeRampMs, freeMs = TUCK.freewheelMs;
+  const rampDist = (v0 + vS) / 2 * rampMs;
+  const freeDist = vS * freeMs / 2;
+  const nominal = TUCK.strokes * C / 2 + freeDist;  /* one stroke = half a crank turn */
+  let stop = 0, dist = 0, miss = Infinity;
+  for (const p of TUCK.stopPhases) {
+    for (let n = 0; n <= TUCK.strokes; n++) {
+      const d = (p - from + C) % C + n * C;
+      if (Math.abs(d - nominal) < miss) { miss = Math.abs(d - nominal); dist = d; stop = p; }
+    }
+  }
+  const powerMs = Math.max(0, (dist - rampDist - freeDist) / vS);
+  const strokeEnd = rampMs + powerMs;  /* last stroke done: the tuck begins */
+  const crankEnd = strokeEnd + freeMs;  /* crank at the stop: balancing begins */
+  const strokeDist = rampDist + vS * powerMs;
+  const crankAt = t => {  /* crank distance travelled at t; speed (crank ms per ms) */
+    if (t < rampMs) return [v0 * t + (vS - v0) * t * t / (2 * rampMs), v0 + (vS - v0) * t / rampMs];
+    if (t < strokeEnd) return [rampDist + vS * (t - rampMs), vS];
+    if (t < crankEnd) {
+      const u = (t - strokeEnd) / freeMs;
+      return [strokeDist + (dist - strokeDist) * (2 * u - u * u), vS * (1 - u)];
+    }
+    return [dist, 0];
+  };
+
+  /* Rider speed on screen (px/ms, relative to the camera). Each stroke
+     pushes: acceleration ∝ |sin| of the crank angle, peaking with the pedals
+     level; scaled so the strokes add strokeGain × convoy speed. Integrated
+     once in 1 ms steps. After the strokes: constant acceleration rollAccel. */
+  const vw = window.innerWidth;
+  const w = host.getBoundingClientRect().width;
+  const off = (vw + w) / 2;
+  const convoy = (vw + w) / PASS_MS;
+  const push = [];
+  for (let t = 0; t < strokeEnd; t++) push.push(Math.abs(Math.sin(2 * Math.PI * (from + crankAt(t)[0]) / C)));
+  const pushSum = push.reduce((a, b) => a + b, 0) || 1;
+  const vTab = [0], xTab = [0];
+  for (const p of push) {
+    const v = vTab[vTab.length - 1] + TUCK.strokeGain * convoy * p / pushSum;
+    xTab.push(xTab[xTab.length - 1] + (vTab[vTab.length - 1] + v) / 2);
+    vTab.push(v);
+  }
+  const aRoll = TUCK.rollAccel * convoy / 1000;
+  const riderAt = t => {  /* [offset from x0, speed] */
+    if (t < strokeEnd) {
+      const i = Math.floor(t), f = t - i;
+      return [lerp(xTab[i], xTab[i + 1], f), lerp(vTab[i], vTab[i + 1], f)];
+    }
+    const tr = t - strokeEnd, n = vTab.length - 1;
+    return [xTab[n] + vTab[n] * tr + aRoll * tr * tr / 2, vTab[n] + aRoll * tr];
+  };
+  /* easeOutBack: starts with momentum, swings past the tuck and settles */
+  const swingIn = p => 1 + (TUCK.inBack + 1) * (p - 1) ** 3 + TUCK.inBack * (p - 1) ** 2;
+
+  const t0 = performance.now();
+  let tPrev = t0;
+  let sq0 = null, sq1 = 0;           /* tyre squash (SMIL) run-out during the freewheel */
+  let arrive = null, arriveEnd = 0;  /* 3. Ende */
+  let tUp = null;                    /* start of sitting up */
+  let bob = 0;                       /* balancing: torso offset (SVG units, + = down); held while sitting up, faded by k */
+
+  const finish = () => {
+    Object.values(els).forEach(el => el.style.removeProperty('transform'));
+    s.tuck = false;  /* pedalTick takes over at the ramped-up cadence */
+  };
+
+  const frame = now => {
+    if (!host.isConnected) { s.tuck = false; return; }
+    if (host.dataset.leaving) return;  /* leaves in the tuck; the host is removed afterwards */
+    const t = Math.max(0, now - t0), dt = Math.max(0, now - tPrev);  /* rAF time may precede t0 */
+    tPrev = Math.max(tPrev, now);
+
+    /* crank */
+    if (tUp === null) {
+      const [d, v] = crankAt(t);
+      s.phase = (from + d) % C;
+      s.rpm = v * 60000 / C;
+      if (t >= strokeEnd) {  /* freewheel: the tyre squash runs out to its round state */
+        if (sq0 === null) {
+          svg.pauseAnimations();
+          sq0 = svg.getCurrentTime();
+          sq1 = Math.ceil(sq0 / TUCK_RIG.squashHalfCycle) * TUCK_RIG.squashHalfCycle;
+        }
+        svg.setCurrentTime(sq0 + (sq1 - sq0) * Math.min(1, (t - strokeEnd) / freeMs));
+      }
+      if (t > crankEnd) {  /* balancing: pedals rock about the stop (sin starts at 0 — no jump) */
+        const tb = t - crankEnd;
+        const env = easeSine(Math.min(1, tb / TUCK.balanceFadeMs));
+        const rock = TUCK.pedalRockDeg / 360 * C * Math.sin(2 * Math.PI * tb / TUCK.pedalRockMs);
+        s.phase = (stop + env * rock + C) % C;
+        bob = env * TUCK.bodyBob * Math.sin(2 * Math.PI * tb / TUCK.bodyBobMs);
+      }
+    } else {
+      s.rpm += (CADENCE_BASE_RPM - s.rpm) * (1 - Math.exp(-dt / TUCK.resumeMs));
+      s.phase = (s.phase + dt * s.rpm / 60000 * C) % C;
+    }
+
+    /* rider: strokes, then rolling in the tuck — until off-screen right,
+       then back from the left at the exit speed (arriveCyclist) */
+    if (!arrive) {
+      const [x, v] = riderAt(t);
+      if (x0 + x < off) host.style.transform = tx(x0 + x);
+      else {
+        arrive = arriveCyclist(host, { side: -1, passMs: (vw + w) / v });
+        arriveEnd = arrive.effect.getComputedTiming().endTime;
+      }
+    }
+
+    /* 3. sit up during the last outMs of the braking */
+    if (arrive && tUp === null && arrive.currentTime >= arriveEnd - TUCK.outMs) {
+      tUp = now;
+      svg.unpauseAnimations();
+    }
+    const k = tUp !== null ? 1 - easeSine(Math.min(1, (now - tUp) / TUCK.outMs))
+            : t < strokeEnd ? 0
+            : swingIn(Math.min(1, (t - strokeEnd) / TUCK.inMs));
+    tuckPose(s, els, k, bob);
+    if (tUp !== null && k <= 0) { finish(); return; }
+    requestAnimationFrame(frame);
+  };
+  requestAnimationFrame(frame);
+}
+
+/* Decompose translate · rotate · scale about the pivot (p, p) of a group */
+function tuckRead(el, p = 0) {
+  const m = new DOMMatrixReadOnly(getComputedStyle(el).transform);
+  return {
+    x: m.e - p + (m.a + m.c) * p, y: m.f - p + (m.b + m.d) * p,
+    deg: Math.atan2(m.b, m.a) * 180 / Math.PI, sx: Math.hypot(m.a, m.b), sy: Math.hypot(m.c, m.d),
+  };
+}
+const tuckCss = ({ x, y, deg = 0, sx = 1, sy = 1 }, p = 0) =>
+  `translate(${x}px,${y}px) translate(${p}px,${p}px) rotate(${deg}deg) scale(${sx},${sy}) translate(${-p}px,${-p}px)`;
+const ptAdd = (a, b) => ({ x: a.x + b.x, y: a.y + b.y });
+const ptSub = (a, b) => ({ x: a.x - b.x, y: a.y - b.y });
+const ptLerp = (a, b, u) => ({ x: lerp(a.x, b.x, u), y: lerp(a.y, b.y, u) });
+const bone = deg => {  /* (0, bone) rotated by deg */
+  const r = deg * Math.PI / 180;
+  return { x: -TUCK_RIG.bone * Math.sin(r), y: TUCK_RIG.bone * Math.cos(r) };
+};
+
+/* Pose at blend k: pedalling at the current phase (0) → tuck (1); bob moves torso and hips (+ = down) */
+function tuckPose(s, els, k, bob = 0) {
+  const R = TUCK_RIG, P = R.legPivot;
+
+  /* pedalling pose: lift the overrides, set the phase, read */
+  Object.values(els).forEach(el => el.style.removeProperty('transform'));
+  s.anims.forEach(a => { a.currentTime = s.phase; });
+  const css = {
+    body: tuckRead(els.body), head: tuckRead(els.head, R.headPivot), bike: tuckRead(els.bike),
+    upperArm: tuckRead(els.upperArm, R.upperArmPivot), forearm: tuckRead(els.forearm, R.forearmPivot),
+    legs: [[els.thighFar, els.shankFar], [els.thighNear, els.shankNear]].map(([t, sh]) => [tuckRead(t, P), tuckRead(sh, P)]),
+  };
+  const set = (el, pose, p) => el.style.setProperty('transform', tuckCss(pose, p), 'important');
+
+  /* torso */
+  const bodyCss = { x: css.body.x, y: css.body.y };
+  const shift = { x: TUCK.bodyShift.x, y: TUCK.bodyShift.y + bob };
+  const bodyTuck = ptAdd(R.bodyBase, shift);
+  const body = ptLerp(bodyCss, bodyTuck, k);
+  set(els.body, body);
+
+  /* head, in #upper-body */
+  set(els.head, {
+    x: lerp(css.head.x, R.head.x + TUCK.headShift.x, k), y: lerp(css.head.y, R.head.y + TUCK.headShift.y, k),
+    deg: lerp(css.head.deg, TUCK.headDeg, k), sx: lerp(css.head.sx, 1, k), sy: lerp(css.head.sy, 1, k),
+  }, R.headPivot);
+
+  /* arms: shoulder moves with the torso, the hand stays on the bar */
+  const pivotAt = (pose, p) => ptAdd(bodyCss, { x: pose.x + p, y: pose.y + p });
+  const shoulderCss = pivotAt(css.upperArm, R.upperArmPivot);
+  const wristCss = pivotAt(css.forearm, R.forearmPivot);
+  const shoulder = ptLerp(shoulderCss, ptAdd(bodyTuck, R.shoulder), k);
+  const wrist = ptLerp(wristCss, ptAdd(R.bodyBase, R.wrist), k);
+  const arm = (sh, wr) => {
+    const elbow = hopIK(sh, wr, R.upperArm, R.forearm, 1);
+    return [hopAngle(R.upperArmDir.x, R.upperArmDir.y, sh, elbow), hopAngle(R.forearmDir.x, R.forearmDir.y, wr, elbow)];
+  };
+  const [ua0, fa0] = arm(shoulderCss, wristCss), [ua1, fa1] = arm(shoulder, wrist);
+  const shB = ptSub(shoulder, body), wrB = ptSub(wrist, body);
+  set(els.upperArm, { x: shB.x - R.upperArmPivot, y: shB.y - R.upperArmPivot,
+    deg: ua1 + (css.upperArm.deg - ua0) * (1 - k) }, R.upperArmPivot);
+  set(els.forearm, { x: wrB.x - R.forearmPivot, y: wrB.y - R.forearmPivot,
+    deg: fa1 + (css.forearm.deg - fa0) * (1 - k) }, R.forearmPivot);
+
+  /* legs: hip moves with the torso, the feet stay on the pedals */
+  const crankDeg = s.phase / CRANK_CYCLE_MS * 360;  /* far pedal, clockwise from 12 o'clock */
+  const leg = (hip, foot) => {
+    const knee = hopIK(hip, foot, R.bone, R.bone, -1);
+    const thigh = hopAngle(0, 1, hip, knee);
+    return [thigh, hopAngle(0, 1, knee, foot) - thigh];
+  };
+  css.legs.forEach(([th, sh], i) => {
+    const hipCss = ptAdd(R.legOrigin, { x: th.x + P, y: th.y + P });
+    const kneeCss = ptAdd(hipCss, bone(th.deg));
+    const footCss = ptAdd(kneeCss, bone(th.deg + sh.deg));
+    const a = (crankDeg + 180 * i) * Math.PI / 180;
+    const pedal = { x: R.crank.x + R.crankR * Math.sin(a), y: R.crank.y - R.crankR * Math.cos(a) };
+    const hip = ptLerp(hipCss, ptAdd(R.hip, shift), k);
+    const [t0, s0] = leg(hipCss, footCss);
+    const [t1, s1] = leg(hip, ptLerp(footCss, pedal, k));
+    const hipL = ptSub(hip, R.legOrigin);
+    set(i ? els.thighNear : els.thighFar, { x: hipL.x - P, y: hipL.y - P, deg: t1 + (th.deg - t0) * (1 - k) }, P);
+    set(i ? els.shankNear : els.shankFar, { x: 0, y: R.bone, deg: s1 + (sh.deg - s0) * (1 - k) }, P);
+  });
+
+  /* wheels: bob settles */
+  set(els.bike, { x: css.bike.x * (1 - k), y: lerp(css.bike.y, R.wheelsY, k) });
 }
 
 /* Slow back-and-forth around the centre once the rider has arrived.

@@ -1576,6 +1576,7 @@ function renderImprint() {
 
 function closeImprint() {
   document.removeEventListener('keydown', onImprintKeydown);
+  if (!lastWeatherData) { tryGeolocation(); return; }  /* opened via #impressum before any weather */
   renderWeather(lastWeatherData.weather, lastWeatherData.loc, 'imprintClose');
 }
 
@@ -1745,5 +1746,12 @@ document.addEventListener('DOMContentLoaded', () => {
   const link = document.getElementById('imprint-link');
   link.textContent = UI.imprintLink;
   link.addEventListener('click', (e) => { e.preventDefault(); showImprint(); });
-  tryGeolocation();
+  /* kurzkurz.cc/#impressum opens the imprint + privacy policy directly
+     (the App Store needs a linkable privacy policy) */
+  if (location.hash === '#impressum') {
+    history.replaceState(null, '', location.pathname);
+    renderImprint();
+  } else {
+    tryGeolocation();
+  }
 });
